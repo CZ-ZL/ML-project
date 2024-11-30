@@ -53,7 +53,7 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     print(f"Model: {model_name}")
 
     # Parse test_dates into datetime objects
-    parsed_dates = [datetime.strptime(date, "%d/%m/%Y %H:%M:%S") for date in test_dates]
+    parsed_dates = [datetime.strptime(date, "%Y/%m/%d %H:%M") for date in test_dates]
 
     # Create a dictionary to group values by date
     chunked_values = defaultdict(lambda: {"true_values": [], "predicted_values": []})
