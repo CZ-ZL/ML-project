@@ -53,7 +53,7 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     print(f"Model: {model_name}")
 
     # Parse test_dates into datetime objects
-    parsed_dates = [datetime.strptime(date, "%Y/%m/%d %H:%M") for date in test_dates]
+    parsed_dates = [datetime.strptime(date, "%m/%d/%Y %H:%M") for date in test_dates]
 
     # Create a dictionary to group values by date
     chunked_values = defaultdict(lambda: {"true_values": [], "predicted_values": []})
@@ -61,18 +61,18 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     trend_profit = []
     forecasting_profit = []
     hybrid_profit = []
-    ensamble_profit = []
+    ensemble_profit = []
     trend_profit_per_trade = []
     forecasting_profit_per_trade = []
     hybrid_profit_per_trade = []
-    ensamble_profit_per_trade = []
+    ensemble_profit_per_trade = []
     trend_coeffs = []
     forecasting_coeffs = []
 
     trend_num_trades = []
     forecasting_num_trades = []
     hybrid_num_trades = []
-    ensamble_num_trades = []
+    ensemble_num_trades = []
 
     # Chunk true_values and predicted_values by date
     for date, true_val, pred_val in zip(parsed_dates, true_values, predicted_values):
@@ -92,29 +92,29 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
             trend_profit.append(trading_strategy.total_profit_or_loss["trend"])
             forecasting_profit.append(trading_strategy.total_profit_or_loss["pure_forcasting"])
             hybrid_profit.append(trading_strategy.total_profit_or_loss["hybrid_trend"])
-            ensamble_profit.append(trading_strategy.total_profit_or_loss["ensamble"])
+            ensemble_profit.append(trading_strategy.total_profit_or_loss["ensemble"])
             trend_profit_per_trade_val = trading_strategy.total_profit_or_loss["trend"] / trading_strategy.num_trades["trend"]
             forecasting_profit_per_trade_val = trading_strategy.total_profit_or_loss["pure_forcasting"] / trading_strategy.num_trades["pure_forcasting"]
             hybrid_profit_per_trade_val = trading_strategy.total_profit_or_loss["hybrid_trend"] / trading_strategy.num_trades["hybrid_trend"]
-            ensamble_profit_per_trade_val = trading_strategy.total_profit_or_loss["ensamble"] / trading_strategy.num_trades["ensamble"]
+            ensemble_profit_per_trade_val = trading_strategy.total_profit_or_loss["ensemble"] / trading_strategy.num_trades["ensemble"]
             trend_profit_per_trade.append(trend_profit_per_trade_val)
             forecasting_profit_per_trade.append(forecasting_profit_per_trade_val)
             hybrid_profit_per_trade.append(hybrid_profit_per_trade_val)
-            ensamble_profit_per_trade.append(ensamble_profit_per_trade_val)
+            ensemble_profit_per_trade.append(ensemble_profit_per_trade_val)
             trend_coeffs.append(trading_strategy.trend_coeff)
             forecasting_coeffs.append(trading_strategy.forecasting_coeff)
 
             trend_num_trades.append(trading_strategy.num_trades["trend"])
             forecasting_num_trades.append(trading_strategy.num_trades["pure_forcasting"])
             hybrid_num_trades.append(trading_strategy.num_trades["hybrid_trend"])
-            ensamble_num_trades.append(trading_strategy.num_trades["ensamble"])
+            ensemble_num_trades.append(trading_strategy.num_trades["ensemble"])
         # trading_strategy = TradingStrategy(model_config.WALLET_A, model_config.WALLET_B, model_config.FRAC_KELLY, trade_thresold)
         # trading_strategy.simulate_trading_with_strategies(true_values, predicted_values)
             
     cumulative_trend_profit = np.cumsum(trend_profit)
     cumulative_forecasting_profit = np.cumsum(forecasting_profit)
     cumulative_hybrid_profit = np.cumsum(hybrid_profit)
-    cumulative_ensamble_profit = np.cumsum(ensamble_profit)
+    cumulative_ensemble_profit = np.cumsum(ensemble_profit)
 
     cumulative_trend_profit_per_trade = [
         np.sum(trend_profit[:i+1]) / np.sum(trend_num_trades[:i+1]) for i in range(len(trend_profit))
@@ -125,14 +125,14 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     cumulative_hybrid_profit_per_trade = [
         np.sum(hybrid_profit[:i+1]) / np.sum(hybrid_num_trades[:i+1]) for i in range(len(hybrid_profit))
     ]
-    cumulative_ensamble_profit_per_trade = [
-        np.sum(ensamble_profit[:i+1]) / np.sum(ensamble_num_trades[:i+1]) for i in range(len(ensamble_profit))
+    cumulative_ensemble_profit_per_trade = [
+        np.sum(ensemble_profit[:i+1]) / np.sum(ensemble_num_trades[:i+1]) for i in range(len(ensemble_profit))
     ]
 
     plt.plot(cumulative_trend_profit_per_trade, color='blue', label='Cumulative Trend Profit Per Trade')
     plt.plot(cumulative_forecasting_profit_per_trade, color='red', label='Cumulative Forecasting Profit Per Trade')
     plt.plot(cumulative_hybrid_profit_per_trade, color='green', label='Cumulative Hybrid Profit Per Trade')
-    plt.plot(cumulative_ensamble_profit_per_trade, color='orange', label='Cumulative Ensamble Profit Per Trade')
+    plt.plot(cumulative_ensemble_profit_per_trade, color='orange', label='Cumulative Ensamble Profit Per Trade')
     plt.title('Cumulative Trend and Forecasting Profits Per Trade Using Kelly')
     plt.xlabel('Observation')
     plt.ylabel('Cumulative Profit Per Trade')
@@ -154,7 +154,7 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     plt.plot(cumulative_trend_profit, color='blue', label='Cumulative Trend Profit')
     plt.plot(cumulative_forecasting_profit, color='red', label='Cumulative Forecasting Profit')
     plt.plot(cumulative_hybrid_profit, color='green', label='Cumulative Hybrid Profit')
-    plt.plot(cumulative_ensamble_profit, color='orange', label='Cumulative Ensamble Profit')
+    plt.plot(cumulative_ensemble_profit, color='orange', label='Cumulative Ensamble Profit')
     plt.title('Cumulative Trend and Forecasting Profits Using Kelly')
     plt.xlabel('Observation')
     plt.ylabel('Cumulative Profit')
@@ -166,7 +166,7 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     plt.plot(trend_profit, color = 'blue', label = 'Trend Profit')
     plt.plot(forecasting_profit, color = 'red', label = 'Forcasting Profit')
     plt.plot(hybrid_profit, color = 'green', label = 'Hybrid Profit')
-    plt.plot(ensamble_profit, color='orange', label='Ensamble Profit')
+    plt.plot(ensemble_profit, color='orange', label='Ensamble Profit')
     plt.title('Trend and Forcasting Profits Using Kelly')
     plt.xlabel('Observation')
     plt.ylabel('Profit')
@@ -178,7 +178,7 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     plt.plot(trend_profit_per_trade, color = 'blue', label = 'Trend Profit Per Trade')
     plt.plot(forecasting_profit_per_trade, color = 'red', label = 'Forcasting Profit Per Trade')
     plt.plot(hybrid_profit_per_trade, color = 'green', label = 'Hybrid Profit Per Trade')
-    plt.plot(ensamble_profit_per_trade, color='orange', label='Ensamble Profit Per Trade')
+    plt.plot(ensemble_profit_per_trade, color='orange', label='Ensamble Profit Per Trade')
     plt.title('Trend and Forcasting Profit Per Trade Using Kelly')
     plt.xlabel('Observation')
     plt.ylabel('Profit Per Trade')
@@ -192,16 +192,16 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     trend_profit = []
     forecasting_profit = []
     hybrid_profit = []
-    ensamble_profit = []
+    ensemble_profit = []
     trend_profit_per_trade = []
     forecasting_profit_per_trade = []
     hybrid_profit_per_trade = []
-    ensamble_profit_per_trade = []
+    ensemble_profit_per_trade = []
 
     trend_num_trades = []
     forecasting_num_trades = []
     hybrid_num_trades = []
-    ensamble_num_trades = []
+    ensemble_num_trades = []
 
     # Simulate trading using each of the specified trade thresholds.
     for trade_thresold in trade_thresholds:
@@ -213,27 +213,27 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
             trend_profit.append(trading_strategy.total_profit_or_loss["trend"])
             forecasting_profit.append(trading_strategy.total_profit_or_loss["pure_forcasting"])
             hybrid_profit.append(trading_strategy.total_profit_or_loss["hybrid_trend"])
-            ensamble_profit.append(trading_strategy.total_profit_or_loss["ensamble"])
+            ensemble_profit.append(trading_strategy.total_profit_or_loss["ensemble"])
             trend_profit_per_trade_val = trading_strategy.total_profit_or_loss["trend"] / trading_strategy.num_trades["trend"]
             forecasting_profit_per_trade_val = trading_strategy.total_profit_or_loss["pure_forcasting"] / trading_strategy.num_trades["pure_forcasting"]
             hybrid_profit_per_trade_val = trading_strategy.total_profit_or_loss["hybrid_trend"] / trading_strategy.num_trades["hybrid_trend"]
-            ensamble_profit_per_trade_val = trading_strategy.total_profit_or_loss["ensamble"] / trading_strategy.num_trades["ensamble"]
+            ensemble_profit_per_trade_val = trading_strategy.total_profit_or_loss["ensemble"] / trading_strategy.num_trades["ensemble"]
             trend_profit_per_trade.append(trend_profit_per_trade_val)
             forecasting_profit_per_trade.append(forecasting_profit_per_trade_val)
             hybrid_profit_per_trade.append(hybrid_profit_per_trade_val)
-            ensamble_profit_per_trade.append(ensamble_profit_per_trade_val)
+            ensemble_profit_per_trade.append(ensemble_profit_per_trade_val)
 
             trend_num_trades.append(trading_strategy.num_trades["trend"])
             forecasting_num_trades.append(trading_strategy.num_trades["pure_forcasting"])
             hybrid_num_trades.append(trading_strategy.num_trades["hybrid_trend"])
-            ensamble_num_trades.append(trading_strategy.num_trades["ensamble"])
+            ensemble_num_trades.append(trading_strategy.num_trades["ensemble"])
         # trading_strategy = TradingStrategy(model_config.WALLET_A, model_config.WALLET_B, model_config.FRAC_KELLY, trade_thresold)
         # trading_strategy.simulate_trading_with_strategies(true_values, predicted_values)
             
     cumulative_trend_profit = np.cumsum(trend_profit)
     cumulative_forecasting_profit = np.cumsum(forecasting_profit)
     cumulative_hybrid_profit = np.cumsum(hybrid_profit)
-    cumulative_ensamble_profit = np.cumsum(ensamble_profit)
+    cumulative_ensemble_profit = np.cumsum(ensemble_profit)
 
     cumulative_trend_profit_per_trade = [
         np.sum(trend_profit[:i+1]) / np.sum(trend_num_trades[:i+1]) for i in range(len(trend_profit))
@@ -244,14 +244,14 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     cumulative_hybrid_profit_per_trade = [
         np.sum(hybrid_profit[:i+1]) / np.sum(hybrid_num_trades[:i+1]) for i in range(len(hybrid_profit))
     ]
-    cumulative_ensamble_profit_per_trade = [
-        np.sum(ensamble_profit[:i+1]) / np.sum(ensamble_num_trades[:i+1]) for i in range(len(ensamble_profit))
+    cumulative_ensemble_profit_per_trade = [
+        np.sum(ensemble_profit[:i+1]) / np.sum(ensemble_num_trades[:i+1]) for i in range(len(ensemble_profit))
     ]
 
     plt.plot(cumulative_trend_profit_per_trade, color='blue', label='Cumulative Trend Profit Per Trade')
     plt.plot(cumulative_forecasting_profit_per_trade, color='red', label='Cumulative Forecasting Profit Per Trade')
     plt.plot(cumulative_hybrid_profit_per_trade, color='green', label='Cumulative Hybrid Profit Per Trade')
-    plt.plot(cumulative_ensamble_profit_per_trade, color='orange', label='Cumulative Ensamble Profit Per Trade')
+    plt.plot(cumulative_ensemble_profit_per_trade, color='orange', label='Cumulative Ensamble Profit Per Trade')
     plt.title('Cumulative Trend and Forecasting Profits Per Trade Using Fixed Postion Size')
     plt.xlabel('Observation')
     plt.ylabel('Cumulative Profit Per Trade')
@@ -263,7 +263,7 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     plt.plot(cumulative_trend_profit, color='blue', label='Cumulative Trend Profit')
     plt.plot(cumulative_forecasting_profit, color='red', label='Cumulative Forecasting Profit')
     plt.plot(cumulative_hybrid_profit, color='green', label='Cumulative Hybrid Profit')
-    plt.plot(cumulative_ensamble_profit, color='orange', label='Cumulative Ensamble Profit')
+    plt.plot(cumulative_ensemble_profit, color='orange', label='Cumulative Ensamble Profit')
     plt.title('Cumulative Trend and Forecasting Profits Using Fixed Postion Size')
     plt.xlabel('Observation')
     plt.ylabel('Cumulative Profit')
@@ -275,7 +275,7 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     plt.plot(trend_profit, color = 'blue', label = 'Trend Profit')
     plt.plot(forecasting_profit, color = 'red', label = 'Forcasting Profit')
     plt.plot(hybrid_profit, color = 'green', label = 'Hybrid Profit')
-    plt.plot(ensamble_profit, color='orange', label='Ensamble Profit')
+    plt.plot(ensemble_profit, color='orange', label='Ensamble Profit')
     plt.title('Trend and Forcasting Profits Using Fixed Postion Size')
     plt.xlabel('Observation')
     plt.ylabel('Profit')
@@ -287,7 +287,7 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
     plt.plot(trend_profit_per_trade, color = 'blue', label = 'Trend Profit Per Trade')
     plt.plot(forecasting_profit_per_trade, color = 'red', label = 'Forcasting Profit Per Trade')
     plt.plot(hybrid_profit_per_trade, color = 'green', label = 'Hybrid Profit Per Trade')
-    plt.plot(ensamble_profit_per_trade, color='orange', label='Ensamble Profit Per Trade')
+    plt.plot(ensemble_profit_per_trade, color='orange', label='Ensamble Profit Per Trade')
     plt.title('Trend and Forcasting Profit Per Trade Using Fixed Postion Size')
     plt.xlabel('Observation')
     plt.ylabel('Profit Per Trade')
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_chunk_length", type=int, default=1, help="Length of the output sequences.")
     parser.add_argument("--n_epochs", type=int, default=50, help="Number of training epochs.")
     parser.add_argument("--batch_size", type=int, default=1024, help="Batch size for training.")
-    parser.add_argument("--train_ratio", type=float, default=0.5, help="Ratio of training data used in the train/test split.")
+    parser.add_argument("--train_ratio", type=float, default=0.1, help="Ratio of training data used in the train/test split.")
     parser.add_argument("--data_path", type=str, default="", help="Path to the training data. Currency rates should be provided as 1 A / 1 B, where A and B are the respective currencies.", required=True)
     parser.add_argument("--frac_kelly", type=bool, default=True, help="Enable fractional kelly to size bets.")
     parser.add_argument(
