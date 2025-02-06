@@ -93,7 +93,11 @@ def run_sl_based_trading_strategy(model_name, model_config, trade_thresholds):
             forecasting_profit.append(trading_strategy.total_profit_or_loss["pure_forcasting"])
             hybrid_profit.append(trading_strategy.total_profit_or_loss["hybrid_trend"])
             ensemble_profit.append(trading_strategy.total_profit_or_loss["ensemble"])
-            trend_profit_per_trade_val = trading_strategy.total_profit_or_loss["trend"] / trading_strategy.num_trades["trend"]
+            if trading_strategy.num_trades["trend"] > 0:
+                trend_profit_per_trade_val = trading_strategy.total_profit_or_loss["trend"] / trading_strategy.num_trades["trend"]
+            else:
+                trend_profit_per_trade_val = 0  # No trades executed
+            print(f"Number of trades executed: {trading_strategy.num_trades}")
             forecasting_profit_per_trade_val = trading_strategy.total_profit_or_loss["pure_forcasting"] / trading_strategy.num_trades["pure_forcasting"]
             hybrid_profit_per_trade_val = trading_strategy.total_profit_or_loss["hybrid_trend"] / trading_strategy.num_trades["hybrid_trend"]
             ensemble_profit_per_trade_val = trading_strategy.total_profit_or_loss["ensemble"] / trading_strategy.num_trades["ensemble"]
