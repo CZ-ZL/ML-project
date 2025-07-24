@@ -35,7 +35,7 @@ In this dataset:
 
 ## Example Usage
 ```bash
-python run_trading_strategy.py --model tcn --data_path "dataset/USD-CNH-2023.csv" --n_epochs 50 --input_chunk_length 60 --output_chunk_length 1 --batch_size 32 --train_ratio 0.7 --wallet_a 100000 --wallet_b 700000 --trade_thresholds "0.001,0.002,0.003" --frac_kelly 0.3
+python run_trading_strategy.py --model tcn --data_path "dataset/USD-CNH-2023.csv" --n_epochs 50 --input_chunk_length 60 --output_chunk_length 1 --batch_size 32 --train_ratio 0.7 --wallet_a 100000 --wallet_b 700000 --trade_thresholds "0.001" --frac_kelly 0.3
 ```
 
 The full list of flags and options for the python script is as follows:

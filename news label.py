@@ -25,7 +25,7 @@ window_ends = []
 # Process each news article one by one
 for idx, news in news_df.iterrows():
     T = news['timestamp']
-    window_end = T + pd.Timedelta(minutes=20)
+    window_end = T + pd.Timedelta(minutes=2)
     
     # Record the window start and end times
     window_starts.append(T)
@@ -47,7 +47,7 @@ for idx, news in news_df.iterrows():
     initial_rate = initial_record['Rate']
     
     # Here we use a fixed spread value of 0.0005; adjust if needed.
-    threshold = 10*0.0005  
+    threshold = 3*0.0005  
 
     # Get the FX rate at the end of the window and compute the rate change
     final_record = fx_window.iloc[-1]

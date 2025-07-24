@@ -8,26 +8,25 @@ class TradingStrategy():
     def __init__(self, wallet_a, wallet_b, frac_kelly, trade_threshold):
         """Initialize the TradingStrategy class with the initial wallet balances and Kelly fraction option."""
         self.frac_kelly = frac_kelly
+                                   
         self.trade_threshold = trade_threshold
         # Initialize wallets for different trading strategies
-        self.wallet_a = {'mean_reversion': wallet_a, 'trend': wallet_a, 'pure_forcasting': wallet_a, 'hybrid_mean_reversion': wallet_a, 'hybrid_trend': wallet_a, 'ensemble': wallet_a}
-        self.wallet_b = {'mean_reversion': wallet_b, 'trend': wallet_b, 'pure_forcasting': wallet_b, 'hybrid_mean_reversion': wallet_b, 'hybrid_trend': wallet_b, 'ensemble': wallet_b}
-        # Track profit/loss, wins/losses, and total gains/losses for each strategy
-        self.total_profit_or_loss = {'mean_reversion': 0, 'trend': 0, 'pure_forcasting': 0, 'hybrid_mean_reversion': 0, 'hybrid_trend': 0, 'ensemble': 0}
-        self.num_trades = {'mean_reversion': 0, 'trend': 0, 'pure_forcasting': 0, 'hybrid_mean_reversion': 0, 'hybrid_trend': 0, 'ensemble': 0}
-        self.num_wins = {'mean_reversion': 0, 'trend': 0, 'pure_forcasting': 0, 'hybrid_mean_reversion': 0, 'hybrid_trend': 0, 'ensemble': 0}
-        self.num_losses = {'mean_reversion': 0, 'trend': 0, 'pure_forcasting': 0, 'hybrid_mean_reversion': 0, 'hybrid_trend': 0, 'ensemble': 0}
-        self.total_gains = {'mean_reversion': 0, 'trend': 0, 'pure_forcasting': 0, 'hybrid_mean_reversion': 0, 'hybrid_trend': 0, 'ensemble': 0}
-        self.total_losses = {'mean_reversion': 0, 'trend': 0, 'pure_forcasting': 0, 'hybrid_mean_reversion': 0, 'hybrid_trend': 0, 'ensemble': 0}
-
-        # New: Track open positions
+        strategy_keys = ['mean_reversion', 'trend', 'pure_forecasting', 'hybrid_mean_reversion', 'hybrid_trend', 'ensemble']
+        self.wallet_a = {key: wallet_a for key in strategy_keys}
+        self.wallet_b = {key: wallet_b for key in strategy_keys}
+        
+        # Profit, trades, wins/losses tracking for each strategy
+        self.total_profit_or_loss = {key: 0 for key in strategy_keys}
+        self.num_trades = {key: 0 for key in strategy_keys}
+        self.num_wins = {key: 0 for key in strategy_keys}
+        self.num_losses = {key: 0 for key in strategy_keys}
+        self.total_gains = {key: 0 for key in strategy_keys}
+        self.total_losses = {key: 0 for key in strategy_keys}
+        
+        # Position tracking (adding extra state for mean reversion waiting for reversion)
         self.open_positions = {
-            'mean_reversion': {'type': None, 'size_a': 0, 'size_b': 0, 'entry_ratio': 0},
-            'trend': {'type': None, 'size_a': 0, 'size_b': 0, 'entry_ratio': 0},
-            'pure_forcasting': {'type': None, 'size_a': 0, 'size_b': 0, 'entry_ratio': 0},
-            'hybrid_mean_reversion': {'type': None, 'size_a': 0, 'size_b': 0, 'entry_ratio': 0},
-            'hybrid_trend': {'type': None, 'size_a': 0, 'size_b': 0, 'entry_ratio': 0},
-            'ensemble': {'type': None, 'size_a': 0, 'size_b': 0, 'entry_ratio': 0}
+            key: {'type': None, 'size_a': 0, 'size_b': 0, 'entry_ratio': 0, 'waiting_for_reversion': False}
+            for key in strategy_keys
         }
 
         self.min_trades_for_full_kelly = 50  # Minimum trades before using full Kelly
@@ -39,8 +38,10 @@ class TradingStrategy():
 
         self.trend_coeff = 0
         self.forecasting_coeff = 0
-        self.spread = 0.0005
 
+        self.spread = 0
+        self.trade_threshold = 0.001
+        
     def calculate_profit_for_signals(self, curr_ratio, next_ratio):
         """Calculate potential profit for given signals using fixed position size."""
         max_profit = float('-inf')
@@ -50,28 +51,9 @@ class TradingStrategy():
         for direction in ['buy_currency_a', 'sell_currency_a']:
             # Calculate profit for this direction
             if direction == 'buy_currency_a':
-                # You open (buy) at (curr_ratio + spread/2),  
-                # you close (sell) at (next_ratio - spread/2).
-                open_price = curr_ratio + self.spread / 2
-                close_price = next_ratio - self.spread / 2
-                
-                # Avoid zero or negative
-                if close_price <= 0 or open_price <= 0:
-                    continue
-                
-                # Example P/L in terms of currency B:
-                profit = self.fixed_position_size * (close_price - open_price) / close_price
-
-            else:  # 'sell_currency_a'
-                # You open (sell) at (curr_ratio - spread/2),
-                # you close (buy) at (next_ratio + spread/2).
-                open_price = curr_ratio - self.spread / 2
-                close_price = next_ratio + self.spread / 2
-                
-                if close_price <= 0 or open_price <= 0:
-                    continue
-                
-                profit = self.fixed_position_size * (open_price - close_price) / close_price
+                profit = self.fixed_position_size * (next_ratio - curr_ratio - self.spread / 2) / next_ratio
+            else:  # sell_currency_a
+                profit = self.fixed_position_size * (curr_ratio - next_ratio - self.spread / 2) / next_ratio
             
             # Update best direction if this profit is higher
             if profit > max_profit:
@@ -133,26 +115,36 @@ class TradingStrategy():
         return max(0.01, min(0.25, kelly))
 
     def calculate_profit(self, strategy_name, trade_direction, curr_ratio, f_i, use_kelly):
+        bid_price = curr_ratio + self.spread / 2
+        ask_price = curr_ratio - self.spread / 2
         """Calculate profit/loss and handle position management"""        
         profit_in_base_currency = 0
         
-        # First, close any open position
+        # Check if there's an open position
         if self.open_positions[strategy_name]['type'] is not None:
-            profit_in_base_currency += self.close_position(strategy_name, curr_ratio)
+            # If new trade direction is different from current position type, close the position
+            current_position_type = 'long' if self.open_positions[strategy_name]['type'] == 'long' else 'short'
+            new_position_type = 'long' if trade_direction == 'buy_currency_a' else 'short' if trade_direction == 'sell_currency_a' else None
+            
+            if new_position_type is not None and new_position_type != current_position_type:
+                profit_in_base_currency += self.close_position(strategy_name, curr_ratio)
+            else:
+                # If same type or no trade, don't make a new trade
+                return profit_in_base_currency
         
-        # Then open new position if there's a trade signal
+        # Then open new position if there's a trade signal and no matching position type
         if trade_direction != 'no_trade':
             # Calculate total portfolio value in currency A
-            total_value_in_a = self.wallet_a[strategy_name] + (self.wallet_b[strategy_name] / curr_ratio)
+            total_value_in_a = self.wallet_a[strategy_name] + (self.wallet_b[strategy_name] / ask_price)
 
             if(use_kelly):
                 base_bet_size_a = f_i * total_value_in_a
             else:
-                base_bet_size_a = 1000
+                base_bet_size_a = self.fixed_position_size
             
             if trade_direction == 'buy_currency_a':
                 bet_size_a = min(base_bet_size_a, self.wallet_a[strategy_name])
-                bet_size_b = bet_size_a * (curr_ratio + self.spread / 2)
+                bet_size_b = bet_size_a * ask_price
                 
                 # Check if we have enough B
                 if bet_size_b <= self.wallet_b[strategy_name]:
@@ -163,12 +155,12 @@ class TradingStrategy():
                         'type': 'long',
                         'size_a': bet_size_a,
                         'size_b': bet_size_b,
-                        'entry_ratio': curr_ratio + self.spread / 2
+                        'entry_ratio': ask_price
                     }
                 
             elif trade_direction == 'sell_currency_a':
                 bet_size_a = min(base_bet_size_a, self.wallet_a[strategy_name])
-                bet_size_b = bet_size_a * (curr_ratio - self.spread / 2)
+                bet_size_b = bet_size_a * bid_price
                 
                 if bet_size_a <= self.wallet_a[strategy_name]:
                     self.wallet_a[strategy_name] -= bet_size_a
@@ -178,7 +170,7 @@ class TradingStrategy():
                         'type': 'short',
                         'size_a': bet_size_a,
                         'size_b': bet_size_b,
-                        'entry_ratio': curr_ratio - self.spread / 2
+                        'entry_ratio': bid_price
                     }
         
         return profit_in_base_currency
@@ -190,68 +182,107 @@ class TradingStrategy():
         
         if position['type'] == 'long':
             # Close long position (sell currency A)
+            exit_price = curr_ratio - self.spread / 2
             self.wallet_a[strategy_name] -= position['size_a']
-            self.wallet_b[strategy_name] += position['size_a'] * (curr_ratio - self.spread / 2)
+            self.wallet_b[strategy_name] += position['size_a'] * exit_price
             # Calculate profit
-            profit = position['size_a'] * ((curr_ratio - self.spread / 2) - position['entry_ratio']) / (curr_ratio - self.spread / 2)
+            profit = position['size_a'] * (exit_price - position['entry_ratio']) / exit_price
             
         elif position['type'] == 'short':
             # Close short position (buy currency A)
+            exit_price = curr_ratio + self.spread / 2
             self.wallet_b[strategy_name] -= position['size_b']
-            self.wallet_a[strategy_name] += position['size_b'] / (curr_ratio + self.spread / 2)
+            self.wallet_a[strategy_name] += position['size_b'] / exit_price
             # Calculate profit
-            profit = position['size_a'] * (position['entry_ratio'] - (curr_ratio + self.spread / 2)) / (curr_ratio + self.spread / 2)
+            profit = position['size_a'] * (position['entry_ratio'] - exit_price) / exit_price
         
         # Reset position tracking
-        self.open_positions[strategy_name] = {'type': None, 'size_a': 0, 'size_b': 0, 'entry_ratio': 0}
+        self.open_positions[strategy_name] = {
+            'type': None,
+            'size_a': 0,
+            'size_b': 0,
+            'entry_ratio': 0,
+            'waiting_for_reversion': False
+        }
         
         return profit
+    
+    def analyze_mean_reversion_window(self, recent_rates, min_crossings=10, deviation_multiplier=3):
+        """
+        Analyze the recent window of exchange rates.
+        
+        Parameters:
+          recent_rates: list or np.array of exchange rates for the past N minutes.
+          min_crossings: minimum number of median crossings required.
+          deviation_multiplier: how many times the spread the deviation must exceed.
+          
+        Returns:
+          (trade_direction, median_rate): trade_direction is 'buy_currency_a', 'sell_currency_a', or 'no_trade'
+        """
+        if len(recent_rates) < 2:
+            return 'no_trade', None
 
-    def determine_trade_direction(self, strategy_name, base_ratio_change, predicted_ratio_change, curr_ratio):
+        median_rate = np.median(recent_rates)
+        crossings = 0
+        for i in range(1, len(recent_rates)):
+            # A crossing occurs when the sign of (rate - median) changes.
+            if (recent_rates[i-1] - median_rate) * (recent_rates[i] - median_rate) < 0:
+                crossings += 1
+
+        if crossings < min_crossings:
+            return 'no_trade', median_rate
+
+        current_rate = recent_rates[-1]
+        deviation = abs(current_rate - median_rate)
+        threshold = deviation_multiplier * self.spread  # using spread as the transaction cost
+
+        if deviation < threshold:
+            return 'no_trade', median_rate
+
+        # If current rate is above the median, expect a downward reversion, so sell.
+        if current_rate > median_rate:
+            return 'sell_currency_a', median_rate
+        else:
+            return 'buy_currency_a', median_rate
+
+    def determine_trade_direction(self, strategy_name, base_ratio_change, predicted_ratio_change):
         """Determine the trade direction based on strategy and ratio changes."""
         trade_direction = 'no_trade'
 
-        # Safeguard against curr_ratio == 0
-        #if curr_ratio != 0:
-        #    spread_as_pct = (self.spread / curr_ratio) * 100
-        #else:
-        #    spread_as_pct = 0.0  # or skip trading logic, etc.
-        effective_threshold = self.trade_threshold + self.spread / 2
-        #print(f"base_ratio_change={base_ratio_change:.4f}, effective_threshold={effective_threshold:.4f}")
-
         if(strategy_name == 'mean_reversion'):
             # Mean reversion strategy: trade against significant ratio changes
-            if base_ratio_change > effective_threshold:
-                trade_direction = 'sell_currency_a'
-            elif base_ratio_change < -effective_threshold:
+            if base_ratio_change > self.trade_threshold + self.spread / 2:
                 trade_direction = 'buy_currency_a'
+            elif base_ratio_change < -self.trade_threshold - self.spread / 2:
+                trade_direction = 'sell_currency_a'
+
                 
         elif(strategy_name == 'trend'):
             # Trend strategy: trade towards significant ratio changes
-            if base_ratio_change > effective_threshold:
+            if base_ratio_change > self.trade_threshold + self.spread / 2:
                 trade_direction = 'buy_currency_a'
-            elif base_ratio_change < -effective_threshold:
+            elif base_ratio_change < -self.trade_threshold - self.spread / 2:
                 trade_direction = 'sell_currency_a'
                 
-        elif(strategy_name == 'pure_forcasting'):
+        elif(strategy_name == 'pure_forecasting'):
             # Pure forecasting strategy: trade based on predicted future ratio changes
-            if predicted_ratio_change > effective_threshold:
+            if predicted_ratio_change > self.trade_threshold + self.spread / 2:
                 trade_direction = 'buy_currency_a'
-            elif predicted_ratio_change < -effective_threshold:
+            elif predicted_ratio_change < -self.trade_threshold - self.spread / 2:
                 trade_direction = 'sell_currency_a'
                 
         elif(strategy_name == 'hybrid_mean_reversion'):
             # Hybrid strategy: combine mean reversion and pure forecasting signals
-            if base_ratio_change < -effective_threshold and predicted_ratio_change > effective_threshold:
+            if base_ratio_change < -self.trade_threshold and predicted_ratio_change > self.trade_threshold:
                 trade_direction = 'buy_currency_a'
-            elif base_ratio_change > effective_threshold and predicted_ratio_change < -effective_threshold:
+            elif base_ratio_change > self.trade_threshold and predicted_ratio_change < -self.trade_threshold:
                 trade_direction = 'sell_currency_a'
                 
         elif(strategy_name == 'hybrid_trend'):
             # Hybrid strategy: combine trend and pure forecasting signals
-            if base_ratio_change > effective_threshold and predicted_ratio_change > effective_threshold:
+            if base_ratio_change > self.trade_threshold and predicted_ratio_change > self.trade_threshold:
                 trade_direction = 'buy_currency_a'
-            elif base_ratio_change < -effective_threshold and predicted_ratio_change < -effective_threshold:
+            elif base_ratio_change < -self.trade_threshold and predicted_ratio_change < -self.trade_threshold:
                 trade_direction = 'sell_currency_a'
             
         return trade_direction
@@ -259,8 +290,8 @@ class TradingStrategy():
     def get_strategy_signals(self, base_ratio_change, predicted_ratio_change, curr_ratio, next_ratio):
         """Get the signals (+1, 0, -1) for each strategy."""
         signals = {}
-        for strategy_name in ['trend', 'pure_forcasting']:
-            trade_direction = self.determine_trade_direction(strategy_name, base_ratio_change, predicted_ratio_change, curr_ratio)
+        for strategy_name in ['trend', 'pure_forecasting']:
+            trade_direction = self.determine_trade_direction(strategy_name, base_ratio_change, predicted_ratio_change)
             if trade_direction == 'buy_currency_a':
                 signals[strategy_name] = self.fixed_position_size * (next_ratio - curr_ratio) / next_ratio
             elif trade_direction == 'sell_currency_a':
@@ -283,7 +314,7 @@ class TradingStrategy():
             print("Linear regression model trained.")
 
             # Output the weights
-            strategy_names = ['trend', 'pure_forcasting']
+            strategy_names = ['trend', 'pure_forecasting']
             # weights = self.logistic_model.coef_[0]
             # intercept = self.logistic_model.intercept_[0]
             weights = self.linear_model.coef_
@@ -315,186 +346,185 @@ class TradingStrategy():
         print(f"Final amount in Wallet A - {self.wallet_a}")
         print(f"Final amount in Wallet B - {self.wallet_b}")
 
-    def simulate_trading_with_strategies(self, actual_rates, predicted_rates, use_kelly=True, horizon=50):
+    def simulate_trading_with_strategies(self, actual_rates, predicted_rates, use_kelly=True):
         """
-        Simulate trading over a series of exchange rates using different strategies,
-        but now using a multi-step horizon (looking 'horizon' steps ahead).
-        We'll define 'actual_next_ratio' as the max over the next 'horizon' bars.
+        Simulate trading over a series of exchange rates.
+        The mean-reversion strategy uses a window-based median analysis.
         """
-        strategy_name = "ensemble"
+        window_size = 150  # number of minutes to look back
+        n = len(actual_rates)
         
+        # First half: training phase for linear regression
         historical_data = []
-        split_idx = len(actual_rates)//2
-        print(f"split_idx : {split_idx}")
-        
-        actual_rates_first_half = actual_rates[:split_idx]
-        actual_rates_second_half = actual_rates[split_idx:]
-        
-        trend_cumulative_profit = 0
-        forecast_cumulative_profit = 0
-        max_cumulative_profit = 0
-
-        print("Training loop range = ", 2, "to", len(actual_rates_first_half) - horizon)
-        print("Testing loop range = ", 2, "to", len(actual_rates_second_half) - horizon)
-
-
-        # ---------------------- TRAINING PHASE (FIRST HALF) ----------------------
-        for i in range(2, len(actual_rates_first_half) - horizon):
-            curr_ratio = actual_rates_first_half[i - 1]
-            prev_ratio = actual_rates_first_half[i - 2]
-            predicted_next_ratio = predicted_rates[i]  # If you like, or you can skip
-
-            # Grab the future window of size 'horizon'
-            future_window = actual_rates_first_half[i : i + horizon]
-            future_max = max(future_window)  # Or np.mean(future_window), min(...), etc.
-            actual_next_ratio = future_max
-            
-            # Avoid division by zero
+        split_idx = n // 2
+        for i in range(2, split_idx):
+            curr_ratio = actual_rates[i - 1]
+            prev_ratio = actual_rates[i - 2]
+            predicted_next_ratio = predicted_rates[i]
+            actual_next_ratio = actual_rates[i]
             if prev_ratio != 0 and curr_ratio != 0:
-                predicted_percentage_increase = ((predicted_next_ratio - curr_ratio) / curr_ratio) * 100
-                actual_percentage_increase = ((actual_next_ratio - curr_ratio) / curr_ratio) * 100
-                base_percentage_increase = ((curr_ratio - prev_ratio) / prev_ratio) * 100
+                base_pct = ((curr_ratio - prev_ratio) / prev_ratio) * 100
+                forecast_pct = ((predicted_next_ratio - curr_ratio) / curr_ratio) * 100
             else:
-                print("Skipping iteration due to zero division risk.")
                 continue
-
-            # Evaluate signals for your "trend" and "pure_forcasting"
-            signals = self.get_strategy_signals(
-                base_percentage_increase,
-                predicted_percentage_increase,
-                curr_ratio,
-                actual_next_ratio
-            )
-            trend_cumulative_profit += signals['trend']
-            forecast_cumulative_profit += signals['pure_forcasting']
-
-            # For "max_cumulative_profit," we do a hypothetical single‐trade profit:
-            profit, _ = self.calculate_profit_for_signals(curr_ratio, actual_next_ratio)
-            max_cumulative_profit += profit
-
-            # Store that as a training sample for the linear regression
-            feature_vector = [trend_cumulative_profit, forecast_cumulative_profit]
-            historical_data.append((feature_vector, max_cumulative_profit))
-
-        # Train the linear regression model
-        self.train_linear_regression(historical_data)
-        if self.trained:
+            # Calculate potential profits for trend and forecasting strategies
+            trend_profit = self.fixed_position_size * (actual_next_ratio - curr_ratio - self.spread/2) / actual_next_ratio if actual_next_ratio != 0 else 0
+            forecast_profit = self.fixed_position_size * (actual_next_ratio - curr_ratio - self.spread/2) / actual_next_ratio if actual_next_ratio != 0 else 0
+            historical_data.append(([trend_profit, forecast_profit], trend_profit + forecast_profit))
+        
+        if historical_data:
+            X, y = zip(*historical_data)
+            self.linear_model.fit(X, y) 
+            self.trained = True
             self.trend_coeff = self.linear_model.coef_[0]
             self.forecasting_coeff = self.linear_model.coef_[1]
-        else:
-            self.trend_coeff = 0
-            self.forecasting_coeff = 0
-
-        # Decide which strategy to use for the "ensemble"
-        if (self.trend_coeff >= self.forecasting_coeff):
-            trade_direction_strategy = "trend"
-        else:
-            trade_direction_strategy = "pure_forcasting"
-
-        # ---------------------- TESTING/ACTUAL TRADING PHASE (SECOND HALF) ----------------------
-        # We'll do the same multi-step approach, but now we actually open/close trades in self.calculate_profit().
-        for i in range(2, len(actual_rates_second_half) - horizon):
-            # We'll define j for indexing predicted_rates if needed:
-            # j = i + split_idx  # If your predicted_rates aligns with the original indices
-
-            curr_ratio = actual_rates_second_half[i - 1]
-            prev_ratio = actual_rates_second_half[i - 2]
-            predicted_next_ratio = predicted_rates[i + split_idx]  # if predictions have same length as actual_rates
-
-            # Grab horizon future bars
-            future_window = actual_rates_second_half[i : i + horizon]
-            future_max = max(future_window)
-            actual_next_ratio = future_max
-
-            # Avoid division by zero
-            if prev_ratio != 0 and curr_ratio != 0:
-                predicted_percentage_increase = ((predicted_next_ratio - curr_ratio) / curr_ratio) * 100
-                actual_percentage_increase = ((actual_next_ratio - curr_ratio) / curr_ratio) * 100
-                base_percentage_increase = ((curr_ratio - prev_ratio) / prev_ratio) * 100
-            else:
-                print("Skipping iteration in second half due to zero division risk.")
-                continue
-
-            # Determine the trade direction for the "ensemble" strategy
-            trade_direction = self.determine_trade_direction(
-                trade_direction_strategy,
-                base_percentage_increase,
-                predicted_percentage_increase,
-                curr_ratio
-            )
-
-            if trade_direction != "no_trade":
-                self.num_trades[strategy_name] += 1
-
-            # Calculate the Kelly fraction and open/close trades
-            f_i = self.kelly_criterion(strategy_name)
-            profit = self.calculate_profit(strategy_name, trade_direction, curr_ratio, f_i, use_kelly)
-            self.total_profit_or_loss[strategy_name] += profit
-
-            # Track win/loss stats
-            if profit > 0:
-                self.num_wins[strategy_name] += 1
-                self.total_gains[strategy_name] += abs(profit)
-            elif profit < 0:
-                self.num_losses[strategy_name] += 1
-                self.total_losses[strategy_name] += abs(profit)
-
-        # If there's an open "ensemble" position at the end, close it
-        if self.open_positions[strategy_name]['type'] is not None:
-            final_ratio = actual_rates[-1]
-            profit = self.close_position(strategy_name, final_ratio)
-            self.total_profit_or_loss[strategy_name] += profit
-
-        # ---------------------- OTHER STRATEGIES (MEAN, TREND, HYBRID, ETC.) ----------------------
-        # For each of your other strategies, you can do the exact same loop logic:
-        strategy_names = ['mean_reversion', 'trend', 'pure_forcasting', 'hybrid_mean_reversion', 'hybrid_trend']
-        for strat in strategy_names:
-            for i in range(2, len(actual_rates_second_half) - horizon):
-                curr_ratio = actual_rates_second_half[i - 1]
-                prev_ratio = actual_rates_second_half[i - 2]
-                # Possibly use predicted_rates[i + split_idx] if needed
-
-                # multi-step horizon
-                future_window = actual_rates_second_half[i : i + horizon]
-                future_max = max(future_window)
-                actual_next_ratio = future_max
-
-                if prev_ratio != 0 and curr_ratio != 0:
-                    base_percentage_increase = ((curr_ratio - prev_ratio) / prev_ratio) * 100
-                    # If you have predictions for these strategies, define them, or keep them zero
-                    predicted_percentage_increase = 0  # or define properly
-                else:
-                    continue
-
-                trade_direction = self.determine_trade_direction(
-                    strat,
-                    base_percentage_increase,
-                    predicted_percentage_increase,
-                    curr_ratio
-                )
-
-                if trade_direction != "no_trade":
-                    self.num_trades[strat] += 1
-
-                f_i = self.kelly_criterion(strat)
-                profit = self.calculate_profit(strat, trade_direction, curr_ratio, f_i, use_kelly)
-                self.total_profit_or_loss[strat] += profit
-
+        
+        # Second half: Trading phase
+        for i in range(split_idx, n):
+            curr_ratio = actual_rates[i - 1]
+            predicted_next_ratio = predicted_rates[i]
+            
+            # Compute common signals
+            prev_ratio = actual_rates[i - 2] if i >= split_idx + 2 else curr_ratio
+            base_pct = ((curr_ratio - prev_ratio) / prev_ratio) * 100 if prev_ratio != 0 else 0
+            forecast_pct = ((predicted_next_ratio - curr_ratio) / curr_ratio) * 100 if curr_ratio != 0 else 0
+            
+            # --- Mean Reversion Strategy ---
+            if i >= window_size:
+                recent_window = actual_rates[i - window_size:i]
+                trade_direction, median_rate = self.analyze_mean_reversion_window(recent_window)
+                if trade_direction != 'no_trade' and self.open_positions['mean_reversion']['type'] is None:
+                    self.num_trades['mean_reversion'] += 1
+                    f_i = self.kelly_criterion('mean_reversion')
+                    total_value_in_a = self.wallet_a['mean_reversion'] + (self.wallet_b['mean_reversion'] / curr_ratio)
+                    base_bet_size_a = f_i * total_value_in_a if use_kelly else self.fixed_position_size
+                    
+                    if trade_direction == 'buy_currency_a':
+                        bet_size_a = min(base_bet_size_a, self.wallet_a['mean_reversion'])
+                        bet_size_b = bet_size_a * curr_ratio
+                        if bet_size_b <= self.wallet_b['mean_reversion']:
+                            self.wallet_b['mean_reversion'] -= bet_size_b
+                            self.wallet_a['mean_reversion'] += bet_size_a
+                            self.open_positions['mean_reversion'] = {
+                                'type': 'long',
+                                'size_a': bet_size_a,
+                                'size_b': bet_size_b,
+                                'entry_ratio': median_rate,
+                                'waiting_for_reversion': True
+                            }
+                    elif trade_direction == 'sell_currency_a':
+                        bet_size_a = min(base_bet_size_a, self.wallet_a['mean_reversion'])
+                        bet_size_b = bet_size_a * curr_ratio
+                        if bet_size_a <= self.wallet_a['mean_reversion']:
+                            self.wallet_a['mean_reversion'] -= bet_size_a
+                            self.wallet_b['mean_reversion'] += bet_size_b
+                            self.open_positions['mean_reversion'] = {
+                                'type': 'short',
+                                'size_a': bet_size_a,
+                                'size_b': bet_size_b,
+                                'entry_ratio': median_rate,
+                                'waiting_for_reversion': True
+                            }
+            
+            # Check and close mean-reversion position if reverted or end of simulation
+            pos = self.open_positions['mean_reversion']
+            if pos['waiting_for_reversion'] and pos['type'] is not None:
+                tolerance = 3 * self.spread
+                if abs(curr_ratio - pos['entry_ratio']) < tolerance or i == n - 1:
+                    profit = self.close_position('mean_reversion', curr_ratio)
+                    self.total_profit_or_loss['mean_reversion'] += profit
+                    pos['waiting_for_reversion'] = False
+            
+            # --- Trend Strategy ---
+            trade_direction_trend = self.determine_trade_direction('trend', base_pct, 0)
+            if trade_direction_trend != 'no_trade':
+                self.num_trades['trend'] += 1
+                f_i = self.kelly_criterion('trend')
+                profit = self.calculate_profit('trend', trade_direction_trend, curr_ratio, f_i, use_kelly)
+                self.total_profit_or_loss['trend'] += profit
                 if profit > 0:
-                    self.num_wins[strat] += 1
-                    self.total_gains[strat] += abs(profit)
+                    self.num_wins['trend'] += 1
+                    self.total_gains['trend'] += abs(profit)
                 elif profit < 0:
-                    self.num_losses[strat] += 1
-                    self.total_losses[strat] += abs(profit)
-
-        # Close any leftover positions for the other strategies
-        for strat in strategy_names:
-            if self.open_positions[strat]['type'] is not None:
+                    self.num_losses['trend'] += 1
+                    self.total_losses['trend'] += abs(profit)
+            
+            # --- Pure Forecasting Strategy ---
+            trade_direction_pf = self.determine_trade_direction('pure_forecasting', 0, forecast_pct)
+            if trade_direction_pf != 'no_trade':
+                self.num_trades['pure_forecasting'] += 1
+                f_i = self.kelly_criterion('pure_forecasting')
+                profit = self.calculate_profit('pure_forecasting', trade_direction_pf, curr_ratio, f_i, use_kelly)
+                self.total_profit_or_loss['pure_forecasting'] += profit
+                if profit > 0:
+                    self.num_wins['pure_forecasting'] += 1
+                    self.total_gains['pure_forecasting'] += abs(profit)
+                elif profit < 0:
+                    self.num_losses['pure_forecasting'] += 1
+                    self.total_losses['pure_forecasting'] += abs(profit)
+            
+            # --- Hybrid Mean Reversion Strategy ---
+            trade_direction_hmr = self.determine_trade_direction('hybrid_mean_reversion', base_pct, forecast_pct)
+            if trade_direction_hmr != 'no_trade':
+                self.num_trades['hybrid_mean_reversion'] += 1
+                f_i = self.kelly_criterion('hybrid_mean_reversion')
+                profit = self.calculate_profit('hybrid_mean_reversion', trade_direction_hmr, curr_ratio, f_i, use_kelly)
+                self.total_profit_or_loss['hybrid_mean_reversion'] += profit
+                if profit > 0:
+                    self.num_wins['hybrid_mean_reversion'] += 1
+                    self.total_gains['hybrid_mean_reversion'] += abs(profit)
+                elif profit < 0:
+                    self.num_losses['hybrid_mean_reversion'] += 1
+                    self.total_losses['hybrid_mean_reversion'] += abs(profit)
+            
+            # --- Hybrid Trend Strategy ---
+            trade_direction_ht = self.determine_trade_direction('hybrid_trend', base_pct, forecast_pct)
+            if trade_direction_ht != 'no_trade':
+                self.num_trades['hybrid_trend'] += 1
+                f_i = self.kelly_criterion('hybrid_trend')
+                profit = self.calculate_profit('hybrid_trend', trade_direction_ht, curr_ratio, f_i, use_kelly)
+                self.total_profit_or_loss['hybrid_trend'] += profit
+                if profit > 0:
+                    self.num_wins['hybrid_trend'] += 1
+                    self.total_gains['hybrid_trend'] += abs(profit)
+                elif profit < 0:
+                    self.num_losses['hybrid_trend'] += 1
+                    self.total_losses['hybrid_trend'] += abs(profit)
+            
+            # --- Ensemble Strategy ---
+            if self.trained:
+                signals = self.get_strategy_signals(base_pct, forecast_pct, curr_ratio, predicted_next_ratio)
+                trend_signal = signals.get('trend', 0)
+                forecast_signal = signals.get('pure_forecasting', 0)
+                combined_signal = self.linear_model.predict([[trend_signal, forecast_signal]])[0]
+                if combined_signal > self.trade_threshold:
+                    ensemble_direction = 'buy_currency_a'
+                elif combined_signal < -self.trade_threshold:
+                    ensemble_direction = 'sell_currency_a'
+                else:
+                    ensemble_direction = 'no_trade'
+                if ensemble_direction != 'no_trade':
+                    self.num_trades['ensemble'] += 1
+                    f_i = self.kelly_criterion('ensemble')
+                    profit = self.calculate_profit('ensemble', ensemble_direction, curr_ratio, f_i, use_kelly)
+                    self.total_profit_or_loss['ensemble'] += profit
+                    if profit > 0:
+                        self.num_wins['ensemble'] += 1
+                        self.total_gains['ensemble'] += abs(profit)
+                    elif profit < 0:
+                        self.num_losses['ensemble'] += 1
+                        self.total_losses['ensemble'] += abs(profit)
+        
+        # Close all open positions at the end
+        for strategy in self.open_positions:
+            if self.open_positions[strategy]['type'] is not None:
                 final_ratio = actual_rates[-1]
-                profit = self.close_position(strat, final_ratio)
-                self.total_profit_or_loss[strat] += profit
+                profit = self.close_position(strategy, final_ratio)
+                self.total_profit_or_loss[strategy] += profit
 
-        # Print final results
+        # Display results
         self.display_total_profit()
         self.display_final_wallet_amount()
         self.display_profit_per_trade()
+
+   
